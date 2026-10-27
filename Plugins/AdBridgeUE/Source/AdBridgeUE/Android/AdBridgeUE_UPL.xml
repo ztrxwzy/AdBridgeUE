@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <trace enable="true"/>
+
+
+    <!-- ========================================================= -->
+    <!-- CONFIGURACION DEL PLUGIN                                  -->
+    <!-- ========================================================= -->
+
+    <init>
+
+        <!-- Leer Project Settings / DefaultGame.ini -->
+
+        <setBoolFromProperty
+                result="UseGoogleTestIds"
+                ini="Game"
+                section="/Script/AdBridgeUE.AdBridgeUESettings"
+                property="bUseGoogleTestIds"
+                default="true"/>
+
+        <setStringFromProperty
+                result="ConfiguredAdMobApplicationId"
+                ini="Game"
+                section="/Script/AdBridgeUE.AdBridgeUESettings"
+                property="AdMobApplicationId"
+                default=""/>
+
+        <setStringFromProperty
+                result="ConfiguredInterstitialAdUnitId"
+                ini="Game"
+                section="/Script/AdBridgeUE.AdBridgeUESettings"
+                property="InterstitialAdUnitId"
+                default=""/>
+
+
+        <!-- Por defecto usamos lo configurado por el proyecto -->
+
+        <setString
+                result="EffectiveAdMobApplicationId"
+                value="$S(ConfiguredAdMobApplicationId)"/>
+
+        <setString
+                result="EffectiveInterstitialAdUnitId"
+                value="$S(ConfiguredInterstitialAdUnitId)"/>
+
+
+        <!-- Si estamos en modo Test, usamos los IDs oficiales de Google -->
+
+        <if condition="UseGoogleTestIds">
+
+            <true>
+
+                <setString
+                        result="EffectiveAdMobApplicationId"
+                        value="ca-app-pub-3940256099942544~3347511713"/>
+
+                <setString
+                        result="EffectiveInterstitialAdUnitId"
+                        value="ca-app-pub-3940256099942544/1033173712"/>
+
+            </true>
+
+        </if>
+
+    </init>
+
+
+
+    <!-- ========================================================= -->
+    <!-- ANDROID MANIFEST                                          -->
+    <!-- ========================================================= -->
+
+    <androidManifestUpdates>
+
+        <!-- 1. Creamos el meta-data de AdMob dentro de <application> -->
+        <addElements tag="application" once="true">
+
+            <meta-data
+                    android:name="com.google.android.gms.ads.APPLICATION_ID"/>
+
+        </addElements>
+
+
+        <!-- 2. Recorremos todos los <meta-data> del Manifest -->
+        <loopElements tag="meta-data">
+
+            <!-- 3. Leemos el android:name del meta-data actual -->
+            <setStringFromAttribute
+                    result="CurrentMetaDataName"
+                    tag="$"
+                    name="android:name"/>
+
+
+            <!-- 4. Preguntamos si este meta-data es el de AdMob -->
+            <setBoolIsEqual
+                    result="IsAdMobApplicationId"
+                    arg1="$S(CurrentMetaDataName)"
+                    arg2="com.google.android.gms.ads.APPLICATION_ID"/>
+
+
+            <!-- 5. Si es el de AdMob, le agregamos el Application ID -->
+            <if condition="IsAdMobApplicationId">
+
+                <true>
+
+                    <addAttribute
+                            tag="$"
+                            name="android:value"
+                            value="$S(EffectiveAdMobApplicationId)"/>
+
+                </true>
+
+            </if>
+
+        </loopElements>
+
+    </androidManifestUpdates>
+
+
+
+    <!-- ========================================================= -->
+    <!-- GOOGLE MOBILE ADS SDK                                     -->
+    <!-- ========================================================= -->
+
+    <buildGradleAdditions>
+
+        <insert>
+            <![CDATA[
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-ads:23.6.0'
+}
+
+        ]]>
+        </insert>
+
+    </buildGradleAdditions>
+
+
+
+    <!-- ========================================================= -->
+    <!-- IMPORTS JAVA                                              -->
+    <!-- ========================================================= -->
+
+    <gameActivityImportAdditions>
+
+        <insert>
+            <![CDATA[
+
+import com.google.android.gms.ads.MobileAds;
+import com.google.android.gms.ads.AdRequest;
+import com.google.android.gms.ads.AdError;
+import com.google.android.gms.ads.LoadAdError;
+import com.google.android.gms.ads.FullScreenContentCallback;
+import com.google.android.gms.ads.interstitial.InterstitialAd;
+import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback;
+
+        ]]>
+        </insert>
+
+    </gameActivityImportAdditions>
+
+
+
+    <!-- ========================================================= -->
+    <!-- CONFIGURACION Y LOGICA JAVA                               -->
+    <!-- ========================================================= -->
+
+    <gameActivityClassAdditions>
+
+        <insertValue
+                value="private static final String ABUE_INTERSTITIAL_AD_UNIT_ID = &quot;$S(EffectiveInterstitialAdUnitId)&quot;;"/>
+
+        <insertNewline/>
+
+        <insert>
+            <![CDATA[
+
+        private InterstitialAd ABUE_InterstitialAd = null;
+
+
+        // =========================================================
+        // JAVA -> C++ CALLBACKS
+        // =========================================================
+
+        public native void nativeABUEInterstitialLoaded();
+
+        public native void nativeABUEInterstitialLoadFailed(
+            int errorCode,
+            String errorDomain,
+            String errorMessage
+        );
+
+        public native void nativeABUEInterstitialShown();
+
+        public native void nativeABUEInterstitialShowFailed(
+            int errorCode,
+            String errorDomain,
+            String errorMessage
+        );
+
+        public native void nativeABUEInterstitialClosed();
+
+
+
+        // =========================================================
+        // LOAD
+        // =========================================================
+
+        public void ABUE_LoadInterstitial()
+        {
+            runOnUiThread(() ->
+            {
+                AdRequest adRequest =
+                    new AdRequest.Builder().build();
+
+
+                InterstitialAd.load(
+                    GameActivity.this,
+                    ABUE_INTERSTITIAL_AD_UNIT_ID,
+                    adRequest,
+
+                    new InterstitialAdLoadCallback()
+                    {
+                        @Override
+                        public void onAdLoaded(
+                            InterstitialAd interstitialAd
+                        )
+                        {
+                            ABUE_InterstitialAd = interstitialAd;
+
+                            nativeABUEInterstitialLoaded();
+                        }
+
+
+                        @Override
+                        public void onAdFailedToLoad(
+                            LoadAdError loadAdError
+                        )
+                        {
+                            ABUE_InterstitialAd = null;
+                            android.util.Log.e(
+                                "AdBridgeUE",
+                                loadAdError.toString()
+                            );
+                        
+                            nativeABUEInterstitialLoadFailed(
+                                loadAdError.getCode(),
+                                loadAdError.getDomain(),
+                                loadAdError.getMessage()
+                            );
+                        }
+                    }
+                );
+            });
+        }
+
+
+
+        // =========================================================
+        // SHOW
+        // =========================================================
+
+        public void ABUE_ShowInterstitial()
+        {
+            runOnUiThread(() ->
+            {
+                if (ABUE_InterstitialAd == null)
+                {
+                    nativeABUEInterstitialShowFailed(
+                        -1,
+                        "AdBridgeUE.Java",
+                        "Interstitial is not loaded."
+                    );
+
+                    return;
+                }
+
+
+                ABUE_InterstitialAd.setFullScreenContentCallback(
+                    new FullScreenContentCallback()
+                    {
+                        @Override
+                        public void onAdShowedFullScreenContent()
+                        {
+                            nativeABUEInterstitialShown();
+                        }
+
+
+                        @Override
+                        public void onAdFailedToShowFullScreenContent(
+                            AdError adError
+                        )
+                        {
+                            ABUE_InterstitialAd = null;
+
+                            android.util.Log.e(
+                                "AdBridgeUE",
+                                adError.toString()
+                            );
+                        
+                            nativeABUEInterstitialShowFailed(
+                                adError.getCode(),
+                                adError.getDomain(),
+                                adError.getMessage()
+                            );
+                        }
+
+
+                        @Override
+                        public void onAdDismissedFullScreenContent()
+                        {
+                            ABUE_InterstitialAd = null;
+
+                            nativeABUEInterstitialClosed();
+                        }
+                    }
+                );
+
+
+                ABUE_InterstitialAd.show(
+                    GameActivity.this
+                );
+            });
+        }
+
+        ]]>
+        </insert>
+
+    </gameActivityClassAdditions>
+
+
+
+    <!-- ========================================================= -->
+    <!-- INICIALIZACION GOOGLE MOBILE ADS                          -->
+    <!-- ========================================================= -->
+
+    <gameActivityOnCreateAdditions>
+
+        <insert>
+            <![CDATA[
+
+        new Thread(
+            () -> MobileAds.initialize(
+                this,
+                initializationStatus -> {}
+            )
+        ).start();
+
+        ]]>
+        </insert>
+
+    </gameActivityOnCreateAdditions>
+
+</root>
